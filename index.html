@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07110f" />
+    <meta name="description" content="每半小时发送浏览器通知和提示音的轻量时钟。" />
+    <title>半点时钟</title>
+    <!-- 在首屏绘制前恢复主题，避免刷新时出现明暗闪烁。 -->
+    <script>
+      document.documentElement.dataset.theme = localStorage.getItem("half-hour-theme") || "dark";
+    </script>
+    <link rel="preconnect" href="https://miaoda.feishu.cn" />
+    <link
+      rel="stylesheet"
+      href="https://miaoda.feishu.cn/fonts/css2?family=DM+Mono:wght@300;400;500&amp;family=Noto+Sans+SC:wght@400;500;600&amp;display=swap"
+    />
+    <style>
+      :root {
+        --background: #07110f;
+        --background-top: #091511;
+        --background-bottom: #06100e;
+        --background-glow: rgba(62, 120, 90, 0.25);
+        --surface: rgba(8, 20, 16, 0.76);
+        --surface-strong: #11201b;
+        --reminder-surface: rgba(18, 33, 28, 0.68);
+        --foreground: #edf7ee;
+        --clock-foreground: #f2fbf3;
+        --setting-foreground: #e8f2eb;
+        --muted: #8ca095;
+        --subtle: #5d7166;
+        --accent: #d9ff6b;
+        --accent-hover: #e3ff91;
+        --accent-foreground: #132018;
+        --accent-soft: rgba(217, 255, 107, 0.12);
+        --accent-border: rgba(217, 255, 107, 0.16);
+        --accent-outline: rgba(217, 255, 107, 0.38);
+        --accent-shadow: rgba(217, 255, 107, 0.08);
+        --progress-track: rgba(217, 255, 107, 0.12);
+        --warning: #ffad88;
+        --warning-strong: #ff9a89;
+        --warning-soft: rgba(255, 121, 102, 0.12);
+        --border: rgba(212, 242, 220, 0.14);
+        --control-border: rgba(212, 242, 220, 0.18);
+        --grid-color: rgba(217, 255, 107, 0.14);
+        --icon-surface: #13241e;
+        --permission-surface: #1a2924;
+        --switch-surface: rgba(212, 242, 220, 0.18);
+        --switch-thumb: #edf7ee;
+        --secondary-hover: #13221d;
+        --panel-shadow: rgba(0, 0, 0, 0.22);
+        --focus-ring: rgba(217, 255, 107, 0.52);
+        --mono: "DM Mono", ui-monospace, monospace;
+        --sans: "Noto Sans SC", system-ui, sans-serif;
+      }
+
+      :root[data-theme="light"] {
+        --background: #edf6f1;
+        --background-top: #f8fcf9;
+        --background-bottom: #e2eee6;
+        --background-glow: rgba(116, 173, 136, 0.27);
+        --surface: rgba(255, 255, 255, 0.82);
+        --surface-strong: #f1f8f3;
+        --reminder-surface: rgba(255, 255, 255, 0.74);
+        --foreground: #173025;
+        --clock-foreground: #173025;
+        --setting-foreground: #20382b;
+        --muted: #60766a;
+        --subtle: #71877b;
+        --accent: #4d781c;
+        --accent-hover: #3e6512;
+        --accent-foreground: #f8fff2;
+        --accent-soft: rgba(77, 120, 28, 0.1);
+        --accent-border: rgba(77, 120, 28, 0.2);
+        --accent-outline: rgba(77, 120, 28, 0.34);
+        --accent-shadow: rgba(55, 93, 30, 0.15);
+        --progress-track: rgba(77, 120, 28, 0.13);
+        --warning: #a7442d;
+        --warning-strong: #a7442d;
+        --warning-soft: rgba(175, 67, 43, 0.1);
+        --border: rgba(27, 65, 44, 0.14);
+        --control-border: rgba(27, 65, 44, 0.2);
+        --grid-color: rgba(45, 91, 61, 0.12);
+        --icon-surface: #e5efe8;
+        --permission-surface: #e6eee8;
+        --switch-surface: rgba(40, 76, 54, 0.2);
+        --switch-thumb: #ffffff;
+        --secondary-hover: #e3ede6;
+        --panel-shadow: rgba(44, 77, 55, 0.12);
+        --focus-ring: rgba(77, 120, 28, 0.42);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-width: 320px;
+        color: var(--foreground);
+        background: var(--background);
+        font-family: var(--sans);
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(circle at 50% 24%, var(--background-glow), transparent 32rem),
+          linear-gradient(180deg, var(--background-top) 0%, var(--background-bottom) 100%);
+        transition: background 220ms ease, color 220ms ease;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .clock-page {
+        position: relative;
+        min-height: 100vh;
+        padding: 1.5rem clamp(1rem, 4vw, 4.5rem) 2rem;
+        overflow: hidden;
+      }
+
+      .clock-page::before {
+        position: fixed;
+        z-index: -1;
+        inset: 0;
+        content: "";
+        opacity: 0.11;
+        background-image:
+          linear-gradient(var(--grid-color) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+        background-size: 4rem 4rem;
+        mask-image: linear-gradient(to bottom, black, transparent 80%);
+      }
+
+      .clock-header {
+        display: flex;
+        max-width: 64rem;
+        margin: 0 auto;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+      }
+
+      .brand {
+        display: inline-flex;
+        gap: 0.7rem;
+        align-items: center;
+        color: var(--foreground);
+        font-size: 1rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        text-decoration: none;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 2rem;
+        height: 2rem;
+        place-items: center;
+        border: 1px solid var(--accent-outline);
+        border-radius: 50%;
+        color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      .icon {
+        width: 1rem;
+        height: 1rem;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
+      }
+
+      .live-status {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        color: var(--muted);
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+      }
+
+      .theme-toggle {
+        display: grid;
+        width: 2.75rem;
+        height: 2.75rem;
+        padding: 0;
+        place-items: center;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        color: var(--foreground);
+        background: var(--surface);
+        cursor: pointer;
+        transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+      }
+
+      .theme-toggle:hover {
+        border-color: var(--accent-outline);
+        background: var(--secondary-hover);
+      }
+
+      .theme-toggle:active {
+        transform: translateY(1px);
+      }
+
+      .theme-icon-moon {
+        display: none;
+      }
+
+      :root[data-theme="light"] .theme-icon-sun {
+        display: none;
+      }
+
+      :root[data-theme="light"] .theme-icon-moon {
+        display: block;
+      }
+
+      .status-dot {
+        width: 0.45rem;
+        height: 0.45rem;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 0 var(--focus-ring);
+        animation: pulse 2s infinite;
+      }
+
+      .clock-stage {
+        width: min(100%, 64rem);
+        margin: clamp(4rem, 10vh, 7rem) auto 0;
+      }
+
+      .eyebrow {
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        letter-spacing: 0.13em;
+      }
+
+      .time-display {
+        display: flex;
+        margin: 0.3rem 0 0;
+        align-items: baseline;
+        color: var(--clock-foreground);
+        font-family: var(--mono);
+        font-size: clamp(4.4rem, 14.4vw, 10rem);
+        font-weight: 300;
+        letter-spacing: -0.1em;
+        line-height: 0.98;
+        text-shadow: 0 0 3rem var(--accent-shadow);
+      }
+
+      .time-colon {
+        margin: 0 0.02em;
+        color: var(--accent);
+        font-weight: 300;
+        animation: blink 1s steps(1) infinite;
+      }
+
+      .time-seconds {
+        margin-left: 0.16em;
+        color: var(--muted);
+        font-size: 0.27em;
+        font-style: normal;
+        letter-spacing: -0.05em;
+      }
+
+      .date-display {
+        margin: 1rem 0 2.5rem;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      .reminder-card {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 1rem;
+        align-items: center;
+        padding: 1rem 1.2rem;
+        border: 1px solid var(--accent-border);
+        border-radius: 1rem;
+        background: var(--reminder-surface);
+        box-shadow: 0 1.5rem 5rem var(--panel-shadow);
+        backdrop-filter: blur(1rem);
+      }
+
+      .progress-ring {
+        display: grid;
+        width: 3.25rem;
+        height: 3.25rem;
+        place-items: center;
+        border-radius: 50%;
+        color: var(--accent);
+        background:
+          radial-gradient(circle, var(--surface-strong) 58%, transparent 60%),
+          conic-gradient(var(--accent) var(--progress, 0%), var(--progress-track) 0);
+      }
+
+      .reminder-copy,
+      .countdown-copy {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .reminder-copy span,
+      .countdown-copy span {
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+
+      .reminder-copy strong {
+        color: var(--foreground);
+        font-family: var(--mono);
+        font-size: 1.35rem;
+        font-weight: 500;
+      }
+
+      .countdown-copy {
+        align-items: flex-end;
+      }
+
+      .countdown-copy strong {
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 1rem;
+        font-weight: 500;
+      }
+
+      .control-panel {
+        width: min(100%, 64rem);
+        margin: 1.25rem auto 0;
+        padding: clamp(1.1rem, 3vw, 1.6rem);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        background: var(--surface);
+      }
+
+      .panel-heading {
+        display: flex;
+        gap: 2rem;
+        align-items: flex-end;
+        justify-content: space-between;
+        padding-bottom: 1.1rem;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .panel-label {
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        letter-spacing: 0.13em;
+      }
+
+      .panel-heading h2 {
+        margin: 0.25rem 0 0;
+        font-size: 1.35rem;
+        font-weight: 600;
+        letter-spacing: -0.04em;
+      }
+
+      .panel-heading p {
+        max-width: 22rem;
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.85rem;
+        text-align: right;
+      }
+
+      .setting-list {
+        padding: 0.25rem 0;
+      }
+
+      .setting-item {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 0.9rem;
+        align-items: center;
+        min-height: 4.25rem;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .setting-icon {
+        display: grid;
+        width: 2.3rem;
+        height: 2.3rem;
+        place-items: center;
+        border-radius: 0.65rem;
+        color: var(--muted);
+        background: var(--icon-surface);
+      }
+
+      .setting-copy {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .setting-copy strong,
+      .setting-copy label {
+        color: var(--setting-foreground);
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+
+      .setting-copy span {
+        color: var(--subtle);
+        font-size: 0.75rem;
+      }
+
+      .permission-status {
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+        padding: 0.28rem 0.55rem;
+        border-radius: 999px;
+        color: var(--muted);
+        background: var(--permission-surface);
+        font-size: 0.72rem;
+      }
+
+      .permission-status.granted {
+        color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      .permission-status.denied {
+        color: var(--warning-strong);
+        background: var(--warning-soft);
+      }
+
+      .switch {
+        position: relative;
+        width: 2.75rem;
+        height: 1.5rem;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        cursor: pointer;
+        background: var(--switch-surface);
+        transition: background 180ms ease;
+      }
+
+      .switch::after {
+        position: absolute;
+        top: 0.125rem;
+        left: 0.125rem;
+        width: 1.25rem;
+        height: 1.25rem;
+        border-radius: 50%;
+        content: "";
+        background: var(--switch-thumb);
+        transition: transform 180ms ease;
+      }
+
+      .switch[aria-checked="true"] {
+        background: var(--accent);
+      }
+
+      .switch[aria-checked="true"]::after {
+        background: var(--accent-foreground);
+        transform: translateX(1.25rem);
+      }
+
+      .panel-actions {
+        display: flex;
+        gap: 0.75rem;
+        padding-top: 1rem;
+      }
+
+      .button {
+        display: inline-flex;
+        min-height: 2.75rem;
+        padding: 0 1.1rem;
+        gap: 0.45rem;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid transparent;
+        border-radius: 0.7rem;
+        cursor: pointer;
+        font-size: 0.875rem;
+        font-weight: 600;
+        transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+      }
+
+      .button:active {
+        transform: translateY(1px);
+      }
+
+      .button-primary {
+        color: var(--accent-foreground);
+        background: var(--accent);
+        box-shadow: 0 0.65rem 2rem var(--accent-shadow);
+      }
+
+      .button-primary:hover {
+        background: var(--accent-hover);
+      }
+
+      .button-secondary {
+        border-color: var(--control-border);
+        color: var(--foreground);
+        background: transparent;
+      }
+
+      .button-secondary:hover {
+        background: var(--secondary-hover);
+      }
+
+      .feedback {
+        display: flex;
+        gap: 0.55rem;
+        align-items: center;
+        margin-top: 1rem;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .feedback::before {
+        width: 0.35rem;
+        height: 0.35rem;
+        border-radius: 50%;
+        content: "";
+        background: currentColor;
+      }
+
+      .feedback.success {
+        color: var(--accent);
+      }
+
+      .feedback.warning {
+        color: var(--warning);
+      }
+
+      footer {
+        display: flex;
+        width: min(100%, 64rem);
+        margin: 1.25rem auto 0;
+        gap: 0.55rem;
+        justify-content: center;
+        color: var(--subtle);
+        font-size: 0.72rem;
+      }
+
+      :focus-visible {
+        outline: 3px solid var(--focus-ring);
+        outline-offset: 3px;
+      }
+
+      @keyframes pulse {
+        70% {
+          box-shadow: 0 0 0 0.45rem rgba(217, 255, 107, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(217, 255, 107, 0);
+        }
+      }
+
+      @keyframes blink {
+        50% {
+          opacity: 0.3;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .clock-page {
+          padding-top: 1rem;
+        }
+
+        .clock-stage {
+          margin-top: 4.75rem;
+        }
+
+        .eyebrow span:last-child {
+          display: none;
+        }
+
+        .time-display {
+          justify-content: center;
+          letter-spacing: -0.09em;
+        }
+
+        .date-display {
+          text-align: center;
+        }
+
+        .reminder-card {
+          grid-template-columns: auto 1fr;
+        }
+
+        .countdown-copy {
+          grid-column: 2;
+          align-items: flex-start;
+        }
+
+        .panel-heading {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 0.4rem;
+        }
+
+        .panel-heading p {
+          text-align: left;
+        }
+
+        .panel-actions {
+          flex-direction: column;
+        }
+
+        .button {
+          width: 100%;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .status-dot,
+        .time-colon {
+          animation: none;
+        }
+
+        *,
+        *::after {
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="clock-page">
+      <!-- 顶部品牌与运行状态 -->
+      <header class="clock-header">
+        <a class="brand" href="#clock" aria-label="返回时钟">
+          <span class="brand-mark" aria-hidden="true">
+            <svg class="icon" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M12 7v5l3 2"></path>
+            </svg>
+          </span>
+          <span>半点时钟</span>
+        </a>
+        <div class="header-actions">
+          <div class="live-status"><span class="status-dot" aria-hidden="true"></span>正在计时</div>
+          <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换为浅色主题" title="切换为浅色主题">
+            <svg class="icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path>
+            </svg>
+            <svg class="icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"></path>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- 当前时间与下一次提醒倒计时 -->
+      <section id="clock" class="clock-stage" aria-labelledby="clock-title">
+        <div class="eyebrow"><span>LOCAL TIME</span><span id="timezone">—</span></div>
+        <h1 id="clock-title" class="time-display" aria-label="正在同步本地时间">
+          <span id="hours">--</span><b class="time-colon">:</b><span id="minutes">--</span><em id="seconds" class="time-seconds">--</em>
+        </h1>
+        <p id="date" class="date-display">正在同步本地时间</p>
+
+        <div class="reminder-card">
+          <div id="progress-ring" class="progress-ring" aria-hidden="true">
+            <svg class="icon" viewBox="0 0 24 24">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>
+              <path d="M10 21h4"></path>
+            </svg>
+          </div>
+          <div class="reminder-copy">
+            <span>下一次提醒</span>
+            <strong id="next-reminder">--:--</strong>
+          </div>
+          <div class="countdown-copy">
+            <span id="minutes-left">正在计算</span>
+            <strong id="countdown">--:--</strong>
+          </div>
+        </div>
+      </section>
+
+      <!-- 通知授权、声音偏好与测试操作 -->
+      <section class="control-panel" aria-labelledby="control-title">
+        <div class="panel-heading">
+          <div>
+            <span class="panel-label">REMINDER SETUP</span>
+            <h2 id="control-title">提醒设置</h2>
+          </div>
+          <p>页面保持打开时，将在每个整点与半点提醒你。</p>
+        </div>
+
+        <div class="setting-list">
+          <div class="setting-item">
+            <span class="setting-icon" aria-hidden="true">
+              <svg class="icon" viewBox="0 0 24 24">
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>
+                <path d="M10 21h4"></path>
+              </svg>
+            </span>
+            <div class="setting-copy"><strong>浏览器通知</strong><span>锁屏或切换标签页后也能看到</span></div>
+            <div id="permission-status" class="permission-status"><span id="permission-copy">待授权</span></div>
+          </div>
+
+          <div class="setting-item">
+            <span class="setting-icon" aria-hidden="true">
+              <svg class="icon" viewBox="0 0 24 24">
+                <path d="M11 5 6 9H3v6h3l5 4z"></path>
+                <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+                <path d="M18 6a8 8 0 0 1 0 12"></path>
+              </svg>
+            </span>
+            <div class="setting-copy"><label for="sound-switch">提示音</label><span>到点播放两声清脆提示</span></div>
+            <button id="sound-switch" class="switch" type="button" role="switch" aria-checked="true" aria-label="切换提示音"></button>
+          </div>
+        </div>
+
+        <div class="panel-actions">
+          <button id="enable-notification" class="button button-primary" type="button">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>
+              <path d="M10 21h4"></path>
+            </svg>
+            启用浏览器通知
+          </button>
+          <button id="test-reminder" class="button button-secondary" type="button">立即测试提醒</button>
+        </div>
+
+        <output id="feedback" class="feedback" aria-live="polite">保持页面打开，提醒会在整点和半点准时响起。</output>
+      </section>
+
+      <!-- 页面使用提示 -->
+      <footer><span>每 30 分钟一次</span><span>·</span><span>本地运行，无需登录</span></footer>
+    </main>
+
+    <script>
+      /** 页面状态与 DOM 引用，集中维护以保持提醒逻辑一致。 */
+      const clockState = {
+        soundEnabled: localStorage.getItem("half-hour-sound") !== "off",
+        theme: document.documentElement.dataset.theme,
+        audioContext: null,
+        reminderTimer: null,
+      };
+
+      /** 需要频繁更新的页面节点。 */
+      const clockElements = {
+        hours: document.querySelector("#hours"),
+        minutes: document.querySelector("#minutes"),
+        seconds: document.querySelector("#seconds"),
+        date: document.querySelector("#date"),
+        timezone: document.querySelector("#timezone"),
+        clockTitle: document.querySelector("#clock-title"),
+        nextReminder: document.querySelector("#next-reminder"),
+        minutesLeft: document.querySelector("#minutes-left"),
+        countdown: document.querySelector("#countdown"),
+        progressRing: document.querySelector("#progress-ring"),
+        permissionStatus: document.querySelector("#permission-status"),
+        permissionCopy: document.querySelector("#permission-copy"),
+        notificationButton: document.querySelector("#enable-notification"),
+        soundSwitch: document.querySelector("#sound-switch"),
+        testButton: document.querySelector("#test-reminder"),
+        feedback: document.querySelector("#feedback"),
+        themeToggle: document.querySelector("#theme-toggle"),
+        themeColor: document.querySelector('meta[name="theme-color"]'),
+      };
+
+      /** 将数字补齐为双位时钟格式。 */
+      function pad(value) {
+        return value.toString().padStart(2, "0");
+      }
+
+      /** 计算指定时刻之后的下一个整点或半点。 */
+      function getNextReminderTime(from) {
+        const next = new Date(from);
+        next.setSeconds(0, 0);
+        if (from.getMinutes() < 30) {
+          next.setMinutes(30);
+        } else {
+          next.setHours(from.getHours() + 1, 0, 0, 0);
+        }
+        return next;
+      }
+
+      /** 将剩余毫秒数格式化为分秒倒计时。 */
+      function formatCountdown(milliseconds) {
+        const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+        return `${pad(Math.floor(totalSeconds / 60))}:${pad(totalSeconds % 60)}`;
+      }
+
+      /** 更新页面底部的操作反馈。 */
+      function setFeedback(message, tone = "neutral") {
+        clockElements.feedback.textContent = message;
+        clockElements.feedback.className = `feedback ${tone}`;
+      }
+
+      /** 应用并持久化主题，同时更新浏览器主题色与按钮说明。 */
+      function applyTheme(theme) {
+        const nextTheme = theme === "light" ? "light" : "dark";
+        clockState.theme = nextTheme;
+        document.documentElement.dataset.theme = nextTheme;
+        localStorage.setItem("half-hour-theme", nextTheme);
+        clockElements.themeColor.setAttribute("content", nextTheme === "light" ? "#edf6f1" : "#07110f");
+        const actionLabel = nextTheme === "light" ? "切换为深色主题" : "切换为浅色主题";
+        clockElements.themeToggle.setAttribute("aria-label", actionLabel);
+        clockElements.themeToggle.setAttribute("title", actionLabel);
+      }
+
+      /** 在浅色和深色主题之间切换。 */
+      function toggleTheme() {
+        applyTheme(clockState.theme === "light" ? "dark" : "light");
+      }
+
+      /** 同步浏览器通知权限在页面上的展示状态。 */
+      function updatePermissionStatus() {
+        const permission = "Notification" in window ? Notification.permission : "denied";
+        const copy = { default: "待授权", granted: "已允许", denied: "已阻止" }[permission];
+        clockElements.permissionCopy.textContent = copy;
+        clockElements.permissionStatus.className = `permission-status ${permission}`;
+        clockElements.notificationButton.hidden = permission === "granted";
+      }
+
+      /** 更新当前时间、下一次提醒和半小时进度。 */
+      function updateClock() {
+        const now = new Date();
+        const next = getNextReminderTime(now);
+        const difference = next.getTime() - now.getTime();
+        const minutesLeft = Math.max(0, Math.ceil(difference / 60000));
+        const progress = ((now.getMinutes() % 30) * 60 + now.getSeconds()) / 18;
+
+        clockElements.hours.textContent = pad(now.getHours());
+        clockElements.minutes.textContent = pad(now.getMinutes());
+        clockElements.seconds.textContent = pad(now.getSeconds());
+        clockElements.clockTitle.setAttribute("aria-label", `当前时间 ${pad(now.getHours())} 点 ${pad(now.getMinutes())} 分 ${pad(now.getSeconds())} 秒`);
+        clockElements.date.textContent = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(now);
+        clockElements.nextReminder.textContent = `${pad(next.getHours())}:${pad(next.getMinutes())}`;
+        clockElements.minutesLeft.textContent = `还有 ${minutesLeft} 分钟`;
+        clockElements.countdown.textContent = formatCountdown(difference);
+        clockElements.progressRing.style.setProperty("--progress", `${progress}%`);
+      }
+
+      /** 在用户操作后初始化音频上下文，满足浏览器自动播放限制。 */
+      async function prepareAudio() {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return null;
+        clockState.audioContext ||= new AudioContextClass();
+        if (clockState.audioContext.state === "suspended") await clockState.audioContext.resume();
+        return clockState.audioContext;
+      }
+
+      /** 使用 Web Audio API 创建短促的双音提示。 */
+      function playChime(context) {
+        const startAt = context.currentTime;
+        [659.25, 880].forEach((frequency, index) => {
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          const noteStart = startAt + index * 0.13;
+          oscillator.frequency.value = frequency;
+          oscillator.type = "sine";
+          gain.gain.setValueAtTime(0.0001, noteStart);
+          gain.gain.exponentialRampToValueAtTime(0.18, noteStart + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.32);
+          oscillator.connect(gain);
+          gain.connect(context.destination);
+          oscillator.start(noteStart);
+          oscillator.stop(noteStart + 0.34);
+        });
+      }
+
+      /** 发送系统通知，并在用户允许时播放提示音。 */
+      async function sendReminder(isTest = false) {
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification(isTest ? "半点时钟 · 测试提醒" : "半点时钟", {
+            body: isTest ? "通知与提示音已准备好。" : `现在是 ${pad(new Date().getHours())}:${pad(new Date().getMinutes())}，起来活动一下吧。`,
+          });
+        }
+
+        if (clockState.soundEnabled) {
+          const context = await prepareAudio();
+          if (context) playChime(context);
+        }
+
+        if (isTest) {
+          const canNotify = "Notification" in window && Notification.permission === "granted";
+          setFeedback(
+            canNotify ? "测试提醒已发送，请留意系统通知和提示音。" : "提示音已播放；启用浏览器通知后才能收到系统通知。",
+            canNotify ? "success" : "warning",
+          );
+        }
+      }
+
+      /** 每次触发后重新计算时间边界，避免长期运行产生累计漂移。 */
+      function scheduleNextReminder() {
+        window.clearTimeout(clockState.reminderTimer);
+        const delay = getNextReminderTime(new Date()).getTime() - Date.now();
+        clockState.reminderTimer = window.setTimeout(async () => {
+          await sendReminder();
+          scheduleNextReminder();
+        }, delay);
+      }
+
+      /** 请求通知权限，同时初始化提示音播放环境。 */
+      async function enableNotifications() {
+        await prepareAudio();
+        if (!("Notification" in window)) {
+          setFeedback("当前浏览器不支持系统通知。", "warning");
+          return;
+        }
+
+        const permission = await Notification.requestPermission();
+        updatePermissionStatus();
+        setFeedback(
+          permission === "granted" ? "通知已启用，下一次提醒会准时发送。" : "通知未获授权，可在浏览器站点设置中重新开启。",
+          permission === "granted" ? "success" : "warning",
+        );
+      }
+
+      /** 切换并保存提示音偏好，开启时播放一遍试听音。 */
+      async function toggleSound() {
+        clockState.soundEnabled = !clockState.soundEnabled;
+        localStorage.setItem("half-hour-sound", clockState.soundEnabled ? "on" : "off");
+        clockElements.soundSwitch.setAttribute("aria-checked", String(clockState.soundEnabled));
+        if (clockState.soundEnabled) {
+          const context = await prepareAudio();
+          if (context) playChime(context);
+        }
+      }
+
+      clockElements.timezone.textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      clockElements.soundSwitch.setAttribute("aria-checked", String(clockState.soundEnabled));
+      clockElements.notificationButton.addEventListener("click", enableNotifications);
+      clockElements.soundSwitch.addEventListener("click", toggleSound);
+      clockElements.testButton.addEventListener("click", () => sendReminder(true));
+      clockElements.themeToggle.addEventListener("click", toggleTheme);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+          updateClock();
+          updatePermissionStatus();
+          scheduleNextReminder();
+        }
+      });
+
+      updateClock();
+      applyTheme(clockState.theme);
+      updatePermissionStatus();
+      scheduleNextReminder();
+      window.setInterval(updateClock, 1000);
+    </script>
+  </body>
+</html>
